@@ -2,7 +2,7 @@ import sqlite3
 import telebot
 from telebot import types
 
-API_TOKEN = 'TOKEN'
+API_TOKEN = '6561744201:AAFlX7bqKzRCLIQglCDCh5S80PQjCArBqXc'
 bot = telebot.TeleBot(API_TOKEN, parse_mode='HTML')
 con = sqlite3.connect('main.db', check_same_thread=False)
 admins_id = [1142412436]
