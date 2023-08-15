@@ -35,12 +35,151 @@ def send_welcome(message):
         bot.send_message(message.from_user.id, "Ты можешь выбрать другие разделы:", reply_markup=markup_1)
 
 
+@bot.message_handler(func=lambda message: message.text == '/adm' and message.from_user.id in admins_id)
+def send_admin(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    markup.add(types.KeyboardButton("🏁 Старт опроса"), types.KeyboardButton("⛔ Остановка опроса"),
+               types.KeyboardButton("✏️ Изменить статус"))
+    bot.send_message(message.from_user.id, "Добро пожалось в меню админа!", reply_markup=markup)
+
+
+@bot.message_handler(func=lambda message: message.text == "✏️ Изменить статус" and message.from_user.id in admins_id)
+def change_status_1(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for i in classes_names:
+        markup.add(types.KeyboardButton(i))
+    markup.add(types.KeyboardButton("⬅️ Вернуться в меню"))
+    bot.send_message(message.from_user.id, "По какому предмету изменить статус пользователя?", reply_markup=markup)
+    bot.register_next_step_handler(message, change_status_2)
+
+
+def change_status_2(message):
+    if message.text == "⬅️ Вернуться в меню":
+        send_admin(message)
+    else:
+        num = classes_names.index(message.text)
+        bot.send_message(message.from_user.id, f"Введи имя пользователя, статус которого надо поменять "
+                                               f"в очереди на {classes_names[num]}")
+        bot.register_next_step_handler(message, change_status_3, num)
+
+
+def change_status_3(message, num):
+    cur = con.cursor()
+    cur.execute(f'SELECT {classes[num]} FROM users WHERE name = "{message.text}";')
+    temp = cur.fetchall()
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    if len(temp) == 0:
+        bot.send_message(message.from_user.id, f"Такого пользователя не существует")
+        send_admin(message)
+    elif temp[0][0] == 0:
+        markup.add(types.KeyboardButton("Да, поставить"), types.KeyboardButton("Нет"))
+        bot.send_message(message.from_user.id,
+                         f"Пользователь НЕ находится в очереди на {classes_names[num]}, поставить?",
+                         reply_markup=markup)
+        bot.register_next_step_handler(message, change_status_4, num, message.text)
+    else:
+        markup.add(types.KeyboardButton("Да, удалить"), types.KeyboardButton("Нет"))
+        bot.send_message(message.from_user.id,
+                         f"Пользователь находится в очереди на {classes_names[num]}, удалить?",
+                         reply_markup=markup)
+        bot.register_next_step_handler(message, change_status_4, num, message.text)
+
+
+def change_status_4(message, num, name):
+    cur = con.cursor()
+    cur.execute(f'SELECT tg_id FROM users WHERE name = "{name}";')
+    tg = cur.fetchall()[0][0]
+    if message.text == 'Да, поставить':
+        cur.execute(f'SELECT MAX({classes[num]}) FROM users;')
+        cur_num = cur.fetchall()[0][0] + 1
+        cur.execute(f'UPDATE users SET {classes[num]} = {cur_num} WHERE tg_id = {tg};')
+        con.commit()
+        bot.send_message(tg, f"🚨 Администратор поставил тебя в очередь на {classes_names[num]}")
+        markup, st = get_queues_list_text(tg)
+        cur.execute(f'SELECT last_message FROM users WHERE tg_id = {tg};')
+        lst_msg = cur.fetchall()[0][0]
+        bot.edit_message_text(st, tg, lst_msg, reply_markup=markup)
+        bot.send_message(message.from_user.id, f"Добавлено, теперь он имеет номер - {cur_num}")
+        send_admin(message)
+    elif message.text == 'Да, удалить':
+        cur.execute(f'UPDATE users SET {classes[num]} = 0 WHERE tg_id = {tg};')
+        con.commit()
+        markup, st = get_queues_list_text(tg)
+        cur.execute(f'SELECT last_message FROM users WHERE tg_id = {tg};')
+        lst_msg = cur.fetchall()[0][0]
+        bot.edit_message_text(st, tg, lst_msg, reply_markup=markup)
+        bot.send_message(tg, f"🚨 Администратор удалил тебя из очереди на {classes_names[num]}")
+        bot.send_message(message.from_user.id, "Удалено")
+        send_admin(message)
+    else:
+        bot.send_message(message.from_user.id, "Отменено")
+        send_admin(message)
+
+
+@bot.message_handler(func=lambda message: message.text == "⛔ Остановка опроса" and message.from_user.id in admins_id)
+def stop_poll_1(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for i in classes_names:
+        markup.add(types.KeyboardButton(i))
+    markup.add(types.KeyboardButton("⬅️ Вернуться в меню"))
+    bot.send_message(message.from_user.id, "По какому предмету остановить опрос?", reply_markup=markup)
+    bot.register_next_step_handler(message, stop_poll_2)
+
+
+def stop_poll_2(message):
+    if message.text == "⬅️ Вернуться в меню":
+        send_admin(message)
+    else:
+        num = classes_names.index(message.text)
+        markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+        markup.add(types.KeyboardButton("Да"), types.KeyboardButton("Нет"))
+        bot.send_message(message.from_user.id,
+                         f"Точно завершить опрос по {classes_names[num]} и удалить неответивших?", reply_markup=markup)
+        bot.register_next_step_handler(message, stop_poll_3, num)
+
+
+def stop_poll_3(message, num):
+    if message.text == 'Да':
+        bot.send_message(message.from_user.id, f"Остановлен опрос по {classes_names[num]} от {class_dates[num]}")
+        stop_poll(num)
+        send_admin(message)
+    else:
+        bot.send_message(message.from_user.id, f"Отменено")
+        send_admin(message)
+
+
+@bot.message_handler(func=lambda message: message.text == '🏁 Старт опроса' and message.from_user.id in admins_id)
+def start_poll_1(message):
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    for i in classes_names:
+        markup.add(types.KeyboardButton(i))
+    markup.add(types.KeyboardButton("⬅️ Вернуться в меню"))
+    bot.send_message(message.from_user.id, "По какому предмету запустить опрос?", reply_markup=markup)
+    bot.register_next_step_handler(message, start_poll_2)
+
+
+def start_poll_2(message):
+    if message.text == "⬅️ Вернуться в меню":
+        send_admin(message)
+    else:
+        num = classes_names.index(message.text)
+        bot.send_message(message.from_user.id, f"Введи дату последнего занятия по {classes_names[num]}")
+        bot.register_next_step_handler(message, start_poll_3, num)
+
+
+def start_poll_3(message, num):
+    class_dates[num] = message.text
+    bot.send_message(message.from_user.id, f"Начат опрос по {classes_names[num]} от {class_dates[num]}")
+    select_fb_list(num)
+    send_admin(message)
+
+
+
 def auto_stop_poll(num):
     cur = con.cursor()
     cur.execute(f'SELECT tg_id FROM users WHERE {fb_list[num]} = 1;')
     if len(cur.fetchall()) == 0:
         stop_poll(num)
-
 
 
 def stop_poll(num):
@@ -71,17 +210,17 @@ def show_polls(message):
     cur = con.cursor()
     s, markup = get_polls_list(message.from_user.id)
     if s == 'ℹ️ Сейчас нет открытых опросов, достуных тебе для участия':
-        bot.send_message(message.from_user.id, s)
         send_welcome(message)
+        bot.send_message(message.from_user.id, s)
     else:
         cur.execute(f'SELECT last_fb FROM users WHERE tg_id = {message.from_user.id};')
         temp = cur.fetchall()[0][0]
         if temp is not None:
             bot.delete_message(message.from_user.id, temp)
+        send_welcome(message)
         lst = bot.send_message(message.from_user.id, s, reply_markup=markup).message_id
         cur.execute(f'UPDATE users SET last_fb = {lst} WHERE tg_id = {message.from_user.id};')
         con.commit()
-    send_welcome(message)
 
 
 def get_polls_list(id):
@@ -177,8 +316,8 @@ def see_lists_2(message):
         ind = classes_names.index(message.text)
         st = get_full_list(ind, message.from_user.id)
         st = f'Полный список {classes_names[ind]}:\n' + st + '\n\n<i>Ты выделен(а) жирным шрифтом</i>'
-        bot.send_message(message.from_user.id, st)
         send_welcome(message)
+        bot.send_message(message.from_user.id, st)
     else:
         bot.send_message(message.from_user.id, "⚠️ Такого предмета не существует, введи другой")
         see_lists_1(message)
